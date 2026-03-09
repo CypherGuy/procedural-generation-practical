@@ -13,8 +13,24 @@ w = wall
 t = treasure
 """
 
-seed = 0
+seed = 1500
 size = 10
+
+
+# I changed the formula since that's obviously not ranoom enough. For now I'll use a mixed LCG
+
+def formula(x, a, c, m):
+    return (a * x + c) % m
+
+
+""" With a mixed LCG, there's rules to adhere to in order to get the maximum period (Most numbers without repeating a cycle):
+
+- gcd(c, m) = 1. In other words c and m are coprime
+- a - 1 should be divisible by all the prime factors of m
+- If m is divisible by 4, a - 1 should also be divisible by 4
+
+"""
+
 grid = []
 
 #Step 0: Initialize the grid
@@ -29,6 +45,11 @@ for i in range(size):
     for j in range(size):
         grid[i][j] = "g"
 
+def generate_states():
+    state = seed
+    for _ in range(size ** 2):
+        state = formula(state, 5, 1, 2**32)
+        yield state
 
 # for i in range(size):
 #     for j in range(size):
