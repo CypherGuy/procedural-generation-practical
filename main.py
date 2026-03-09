@@ -14,10 +14,10 @@ t = treasure
 """
 
 seed = 1500
-size = 10
+size = 15
 
 
-# I changed the formula since that's obviously not ranoom enough. For now I'll use a mixed LCG
+# I changed the formula since that's obviously not random enough while still being deterministic. For now I'll use a mixed LCG
 
 def formula(x, a, c, m):
     return (a * x + c) % m
@@ -51,9 +51,21 @@ def generate_states():
         state = formula(state, 5, 1, 2**32)
         yield state
 
-# for i in range(size):
-#     for j in range(size):
-#         print(grid[i][j], end=" ")
-#     print()
+# We call the generate states function and see if it should be a wall. Note that we should avoid modding by 2,4 and 8 as those are powers of two and with Mixed LCG's, this may not be random
+def is_wall(state):
+    return state % 9 == 0
+
+# Actually place the walls
+for index, state in enumerate(generate_states()):
+    if is_wall(state):
+        x, y = divmod(index, size)
+        grid[x][y] = "w"
+
+
+
+for i in range(size):
+    for j in range(size):
+        print(grid[i][j], end=" ")
+    print()
 
 
