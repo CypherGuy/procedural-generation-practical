@@ -1,8 +1,9 @@
 from collections import deque
+import math
 import sys
 
 try:
-    import pygame  # type: ignore[import-not-found]
+    import pygame 
 except ImportError:
     pygame = None
 
@@ -62,34 +63,11 @@ def generate_states():
 def is_wall(state):
     return state % 9 == 0
 
-def is_player(state):
-    return state % 150 == 0
-
-
-def is_treasure(state):
-    return state % 170 == 0
-
-
 # Actually place the walls
 for index, state in enumerate(generate_states()):
     if is_wall(state):
         x, y = divmod(index, size)
         grid[x][y] = "w"
-
-def player_in_map():
-    for i in range(size):
-        for j in range(size):
-            if grid[i][j] == "p":
-                return True
-    return False
-
-
-def treasure_in_map():
-    for i in range(size):
-        for j in range(size):
-            if grid[i][j] == "t":
-                return True
-    return False
 
 def nth_grass_position(n):
     count = 0
@@ -122,8 +100,14 @@ if treasure_pos is not None:
     tx, ty = treasure_pos
     grid[tx][ty] = "t"
 
-# Verify map has 1 player, 1 treasure and that the treasure is reachable
 def verify_map(grid):
+    """
+    Verify map meets all the following: 
+    - 1 player 
+    - 1 treasure 
+    - The treasure is reachable
+    - There is a set distance between player and treasure to stop very easy maps
+    """
     local_size = len(grid)
     player_pos = None
     treasure_pos = None
@@ -145,23 +129,26 @@ def verify_map(grid):
 
     if player_pos is None or treasure_pos is None:
         return False
+    
+    # Set the minimum shortest path to be at least 2/3 of local_size
+    min_shortest_path = math.ceil((2 * local_size) / 3)
 
-    queue = deque([player_pos])
+    queue = deque([(player_pos, 0)])
     visited = {player_pos}
     directions = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
     while queue:
-        x, y = queue.popleft()
+        (x, y), distance = queue.popleft()
 
         if (x, y) == treasure_pos:
-            return True
+            return distance >= min_shortest_path
 
         for dx, dy in directions:
             nx, ny = x + dx, y + dy
             if 0 <= nx < local_size and 0 <= ny < local_size:
                 if (nx, ny) not in visited and grid[nx][ny] != "w":
                     visited.add((nx, ny))
-                    queue.append((nx, ny))
+                    queue.append(((nx, ny), distance + 1))
 
     return False
 
@@ -177,7 +164,7 @@ def draw_map_pygame(grid):
     max_map_size = 80
     seed_step = 10
     key_repeat_delay_ms = 350
-    key_repeat_interval_ms = 250  # 4 repeats/second
+    key_repeat_interval_ms = 250  # Increases value by 4 times a second
     backspace_repeat_interval_ms = 70
     colors = {
         "g": (34, 139, 34),      # grass: green
@@ -187,7 +174,7 @@ def draw_map_pygame(grid):
     }
 
     pygame.init()
-    pygame.display.set_caption("Procedural Map")
+    pygame.display.set_caption("Procedural Map Generator")
     current_size = size
     initial_w = max(min_window_w, current_size * 32)
     initial_h = max(min_window_h, current_size * 32 + hud_height)
