@@ -1,11 +1,9 @@
-# 1487 1498
-
 from collections import deque
 import math
 import sys
 
 try:
-    import pygame 
+    import pygame  # type: ignore[import-not-found]
 except ImportError:
     pygame = None
 
@@ -170,7 +168,7 @@ def verify_map(grid):
     - 1 treasure 
     - The treasure is reachable
     - There is a set distance between player and treasure to stop very easy maps
-    TODO: The player can access the entrance of all buildings 
+    - The player can access the entrance of all buildings 
     """
     local_size = len(grid)
     player_pos = None
@@ -189,10 +187,10 @@ def verify_map(grid):
 
     # Must contain exactly one player and one treasure.
     if player_count != 1 or treasure_count != 1:
-        return False
+        return False, "need exactly 1 player and 1 treasure"
 
     if player_pos is None or treasure_pos is None:
-        return False
+        return False, "player or treasure position missing"
     
     # Set the minimum shortest path to be at least 2/3 of local_size
     min_shortest_path = math.ceil((2 * local_size) / 3)
@@ -205,16 +203,18 @@ def verify_map(grid):
         (x, y), distance = queue.popleft()
 
         if (x, y) == treasure_pos:
-            return distance >= min_shortest_path
+            if distance >= min_shortest_path:
+                return True, ""
+            return False, f"shortest path {distance} < required {min_shortest_path}"
 
         for dx, dy in directions:
             nx, ny = x + dx, y + dy
             if 0 <= nx < local_size and 0 <= ny < local_size:
-                if (nx, ny) not in visited and grid[nx][ny] != "w":
+                if (nx, ny) not in visited and grid[nx][ny] not in ("w", "b"):
                     visited.add((nx, ny))
                     queue.append(((nx, ny), distance + 1))
 
-    return False
+    return False, "treasure is unreachable"
 
 def draw_map_pygame(grid):
     if pygame is None:
@@ -257,7 +257,7 @@ def draw_map_pygame(grid):
         seed_input = str(current_seed)
 
     grid = generate_map(current_seed, current_size)
-    is_possible = verify_map(grid)
+    is_possible, map_reason = verify_map(grid)
 
     running = True
     while running:
@@ -353,7 +353,7 @@ def draw_map_pygame(grid):
 
         if seed_changed:
             grid = generate_map(current_seed, current_size)
-            is_possible = verify_map(grid)
+            is_possible, map_reason = verify_map(grid)
 
         screen.fill((18, 18, 18))
         info = "up/down +/-10 | left/right +/-1 | [ ] map size | type seed + Enter"
@@ -365,7 +365,7 @@ def draw_map_pygame(grid):
             status_text = "MAP POSSIBLE"
             status_color = (110, 230, 140)
         else:
-            status_text = "MAP NOT POSSIBLE"
+            status_text = f"MAP NOT POSSIBLE - {map_reason}"
             status_color = (255, 90, 90)
 
         screen.blit(font.render(status_text, True, status_color), (8, 52))
