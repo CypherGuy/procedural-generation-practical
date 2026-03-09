@@ -27,8 +27,7 @@ New: b = building
 seed = 1500
 size = 20
 
-# I changed the formula since that's obviously not random enough while still being deterministic. For now I'll use a mixed LCG
-
+# The formula we're using here is called the Mixed Congruential Generator (MCG), the backbone of all the rest of the code. This will form the pseudorandomness of the maps
 def formula(x, a, c, m):
     return (a * x + c) % m
 
@@ -159,7 +158,6 @@ def generate_map(local_seed, map_size):
     return grid
 
 grid = generate_map(seed, size)
-print(grid[0][3])
 
 def verify_map(grid):
     """
