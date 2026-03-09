@@ -1,3 +1,5 @@
+# 1487 1498
+
 from collections import deque
 import math
 import sys
@@ -20,6 +22,8 @@ p = player
 g = grass
 w = wall
 t = treasure
+
+New: b = building
 """
 
 seed = 1500
@@ -39,66 +43,125 @@ def formula(x, a, c, m):
 
 """
 
-grid = []
-
-#Step 0: Initialize the grid
-for i in range(size):
-    row = []
-    for j in range(size):
-        row.append("Unknown")
-    grid.append(row)
-
-# Step 1: All tiles become grass
-for i in range(size):
-    for j in range(size):
-        grid[i][j] = "g"
-
-def generate_states():
-    state = seed
-    for _ in range(size ** 2):
-        state = formula(state, 5, 1, 2**32)
-        yield state
-
 # We call the generate states function and see if it should be a wall. Note that we should avoid modding by 2,4 and 8 as those are powers of two and with Mixed LCG's, this may not be random
 def is_wall(state):
     return state % 9 == 0
 
-# Actually place the walls
-for index, state in enumerate(generate_states()):
-    if is_wall(state):
-        x, y = divmod(index, size)
-        grid[x][y] = "w"
+def generate_map(local_seed, map_size):
+    grid = []
 
-def nth_grass_position(n):
-    count = 0
-    for i in range(0, size):
-        for j in range(0, size):
-            if grid[i][j] == "g":
-                if count == n:
-                    return (i, j)
-                count += 1
-    return None
+    #Step 0: Initialize the grid
+    for i in range(map_size):
+        row = []
+        for j in range(map_size):
+            row.append("Unknown")
+        grid.append(row)
 
-# To deterministically pick a player and treasure location, we can simply do something like seed % (total of grass places) and then use that to decide where to put the player/treasure
-grass_spots = sum(row.count("g") for row in grid)
-state_gen = generate_states()
-player_seed = next(state_gen) % grass_spots
+    # Step 1: All tiles become grass
+    for i in range(map_size):
+        for j in range(map_size):
+            grid[i][j] = "g"
 
-player_pos = nth_grass_position(player_seed)
+    def generate_states():
+        state = local_seed
+        for _ in range(map_size ** 2):
+            state = formula(state, 5, 1, 2**32)
+            yield state
 
-if player_pos is not None:
-    px, py = player_pos
-    grid[px][py] = "p"
+    # Step 2: Place the walls
+    for index, state in enumerate(generate_states()):
+        if is_wall(state):
+            x, y = divmod(index, map_size)
+            grid[x][y] = "w"
 
-# Do the same for the treasure
-treasure_spots = sum(row.count("g") for row in grid)
-treasure_seed = next(state_gen) % treasure_spots
+    def nth_grass_position(n):
+        count = 0
+        for i in range(0, map_size):
+            for j in range(0, map_size):
+                if grid[i][j] == "g":
+                    if count == n:
+                        return (i, j)
+                    count += 1
+        return None
+    
+    def get_all_valid_building_spots(size):
+        # To stop the buildings spawning right on the edge, we can slightly change the parameters in range()
+        building_spots = []
+        for i in range(1, map_size - size):
+            for j in range(1, map_size - size):
+                if grid[i][j] == "g":
+                    building_spots.append((i, j))
+        return building_spots
 
-treasure_pos = nth_grass_position(treasure_seed)
+    # To deterministically pick player, building and treasure spots, we can simply do something like seed % (total of grass places) and then use that to decide where to put the player/treasure.
+    # For the buildings, I only want them to spawn in if the grid is 20x20 or larger.
+    state_gen = generate_states()
+    if map_size >= 20:
+        grass_spots = sum(row.count("g") for row in grid)
+        building_seed = next(state_gen) % grass_spots
 
-if treasure_pos is not None:
-    tx, ty = treasure_pos
-    grid[tx][ty] = "t"
+        building_size = (next(state_gen) % 3) + 4 # If 0 -> 4x4, if 1 -> 5x5, if 2 -> 6x6
+
+        # Decide where to place the building once we have the size of it
+        available_building_spots = nth_grass_position(building_seed)
+       
+        valid_building_spots = get_all_valid_building_spots(building_size)
+        bx, by = valid_building_spots[next(state_gen) % len(valid_building_spots)]
+
+        # Now we build the building. To work out how many total building spots have been placed, we can use the nth term an = 4n-4. But to exclude the corners, we subtract 4 more, so 8 total.
+        total_building_spots = 4 * building_size - 8
+        building_entrance = (next(state_gen) % total_building_spots)
+        count = 0
+        for i in range(building_size):
+            for j in range(building_size):
+                # One thing I noticed during testing is that walls can sometimes block access to, or be inside, the building. As such I'll replace all walls in the building with grass, then switch the block outside the entrance to grass
+                if grid[bx+i][by+j] == "w":
+                    grid[bx+i][by+j] = "g"
+                if i == 0 or i == building_size - 1 or j == 0 or j == building_size - 1:
+                    grid[bx+i][by+j] = "b"
+
+                    # If not a corner
+                    if not (i == 0 and j == 0) and not (i == 0 and j == building_size - 1) and not (i == building_size - 1 and j == 0) and not (i == building_size - 1 and j == building_size - 1):
+
+                        if count == building_entrance:
+                            grid[bx+i][by+j] = "g"
+                            # The plan here to prevent walls preventing us from entering the building from the outside is to find out what edge of the building we're on, and replace any possible blockages with grass
+                            if i == 0:
+                                grid[bx+i-1][by+j] = "g"
+                            elif i == building_size - 1:
+                                grid[bx+i+1][by+j] = "g"
+                            elif j == 0:
+                                grid[bx+i][by+j-1] = "g"
+                            elif j == building_size - 1:
+                                grid[bx+i][by+j+1] = "g"
+
+                        count += 1
+
+                
+
+    grass_spots = sum(row.count("g") for row in grid)
+    player_seed = next(state_gen) % grass_spots
+
+    player_pos = nth_grass_position(player_seed)
+
+    if player_pos is not None:
+        px, py = player_pos
+        grid[px][py] = "p"
+
+    # Do the same for the treasure
+    treasure_spots = sum(row.count("g") for row in grid)
+    treasure_seed = next(state_gen) % treasure_spots
+
+    treasure_pos = nth_grass_position(treasure_seed)
+
+    if treasure_pos is not None:
+        tx, ty = treasure_pos
+        grid[tx][ty] = "t"
+
+    return grid
+
+grid = generate_map(seed, size)
+print(grid[0][3])
 
 def verify_map(grid):
     """
@@ -107,6 +170,7 @@ def verify_map(grid):
     - 1 treasure 
     - The treasure is reachable
     - There is a set distance between player and treasure to stop very easy maps
+    TODO: The player can access the entrance of all buildings 
     """
     local_size = len(grid)
     player_pos = None
@@ -169,6 +233,7 @@ def draw_map_pygame(grid):
     colors = {
         "g": (34, 139, 34),      # grass: green
         "w": (128, 128, 128),    # wall: grey
+        "b": (139, 0, 0),        # building: dark red
         "p": (0, 255, 255),      # player: cyan
         "t": (255, 215, 0),      # treasure: gold
     }
@@ -191,37 +256,7 @@ def draw_map_pygame(grid):
         current_seed += delta
         seed_input = str(current_seed)
 
-    def build_map_from_seed(local_seed, map_size):
-        local_grid = [["g" for _ in range(map_size)] for _ in range(map_size)]
-
-        state = local_seed
-        states = []
-        for _ in range(map_size ** 2):
-            state = formula(state, 5, 1, 2**32)
-            states.append(state)
-
-        for index, value in enumerate(states):
-            if is_wall(value):
-                x, y = divmod(index, map_size)
-                local_grid[x][y] = "w"
-
-        grass_cells = [(i, j) for i in range(map_size) for j in range(map_size) if local_grid[i][j] == "g"]
-        if not grass_cells:
-            return local_grid
-
-        player_index = states[0] % len(grass_cells)
-        px, py = grass_cells[player_index]
-        local_grid[px][py] = "p"
-
-        grass_cells = [(i, j) for i in range(map_size) for j in range(map_size) if local_grid[i][j] == "g"]
-        if grass_cells:
-            treasure_index = states[1] % len(grass_cells)
-            tx, ty = grass_cells[treasure_index]
-            local_grid[tx][ty] = "t"
-
-        return local_grid
-
-    grid = build_map_from_seed(current_seed, current_size)
+    grid = generate_map(current_seed, current_size)
     is_possible = verify_map(grid)
 
     running = True
@@ -317,7 +352,7 @@ def draw_map_pygame(grid):
                 next_repeat_ms[pygame.K_BACKSPACE] = now + backspace_repeat_interval_ms
 
         if seed_changed:
-            grid = build_map_from_seed(current_seed, current_size)
+            grid = generate_map(current_seed, current_size)
             is_possible = verify_map(grid)
 
         screen.fill((18, 18, 18))
