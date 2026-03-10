@@ -31,7 +31,6 @@ size = 20
 def formula(x, a, c, m):
     return (a * x + c) % m
 
-
 """ With a mixed LCG, there's rules to adhere to in order to get the maximum period (Most numbers without repeating a cycle):
 
 - gcd(c, m) = 1. In other words c and m are coprime
@@ -39,6 +38,12 @@ def formula(x, a, c, m):
 - If m is divisible by 4, a - 1 should also be divisible by 4
 
 """
+
+def generate_states(seed, map_size):
+    state = seed
+    for _ in range(map_size ** 2):
+        state = formula(state, 5, 1, 2**32)
+        yield state
 
 # We call the generate states function and see if it should be a wall. Note that we should avoid modding by 2,4 and 8 as those are powers of two and with Mixed LCG's, this may not be random
 def is_wall(state):
@@ -59,14 +64,8 @@ def generate_map(local_seed, map_size):
         for j in range(map_size):
             grid[i][j] = "g"
 
-    def generate_states():
-        state = local_seed
-        for _ in range(map_size ** 2):
-            state = formula(state, 5, 1, 2**32)
-            yield state
-
     # Step 2: Place the walls
-    for index, state in enumerate(generate_states()):
+    for index, state in enumerate(generate_states(local_seed, map_size)):
         if is_wall(state):
             x, y = divmod(index, map_size)
             grid[x][y] = "w"
@@ -92,7 +91,7 @@ def generate_map(local_seed, map_size):
 
     # To deterministically pick player, building and treasure spots, we can simply do something like seed % (total of grass places) and then use that to decide where to put the player/treasure.
     # For the buildings, I only want them to spawn in if the grid is 20x20 or larger.
-    state_gen = generate_states()
+    state_gen = generate_states(local_seed, map_size)
     if map_size >= 20:
         grass_spots = sum(row.count("g") for row in grid)
         building_seed = next(state_gen) % grass_spots
@@ -214,14 +213,61 @@ def verify_map(grid):
 
     return False, "treasure is unreachable"
 
+def on_regenerate_button_pressed(seed, map_size, grid):
+
+    # First thing to do is remove the player and treasure from current map
+    for i in range(map_size):
+        for j in range(map_size):
+            if grid[i][j] == "p":
+                grid[i][j] = "g"
+            elif grid[i][j] == "t":
+                grid[i][j] = "g"
+
+    def nth_grass_position(n):
+            count = 0
+            for i in range(0, map_size):
+                for j in range(0, map_size):
+                    if grid[i][j] == "g":
+                        if count == n:
+                            return (i, j)
+                        count += 1
+            return None
+
+    # Say a user inputs a seed and an invalid world is generated. I think the best way to fix this is to have it, three times, regenerate different things. In the first iteration we can move the player and the treasure and that should be enough for most times.
+    state_gen = generate_states(seed, map_size)
+
+    grass_spots = sum(row.count("g") for row in grid)
+    player_seed = next(state_gen) % grass_spots
+
+    player_pos = nth_grass_position(player_seed)
+
+    if player_pos is not None:
+        px, py = player_pos
+        grid[px][py] = "p"
+
+    # Do the same for the treasure
+    treasure_spots = sum(row.count("g") for row in grid)
+    treasure_seed = next(state_gen) % treasure_spots
+
+    treasure_pos = nth_grass_position(treasure_seed)
+
+    if treasure_pos is not None:
+        tx, ty = treasure_pos
+        grid[tx][ty] = "t"
+
+    if verify_map(grid)[0]:
+        return grid
+
+    return "New generated map is Invalid. Maybe try again?"
+
 def draw_map_pygame(grid):
     if pygame is None:
         print("Pygame is not installed. Run: pip install pygame")
         return
 
-    hud_height = 88
-    min_window_w = 420
-    min_window_h = 420
+    hud_height = 124
+    min_window_w = 860
+    min_window_h = 600
     min_map_size = 5
     max_map_size = 80
     seed_step = 10
@@ -256,7 +302,14 @@ def draw_map_pygame(grid):
 
     grid = generate_map(current_seed, current_size)
     is_possible, map_reason = verify_map(grid)
+    error_bubble_text = ""
+    error_bubble_until_ms = 0
+    action_bubble_text = ""
+    action_bubble_color = (40, 90, 150)
+    action_bubble_until_ms = 0
+    regenerate_count = 0
 
+    regenerate_button_rect = None
     running = True
     while running:
         seed_changed = False
@@ -314,6 +367,26 @@ def draw_map_pygame(grid):
             elif event.type == pygame.KEYUP:
                 if event.key in next_repeat_ms:
                     del next_repeat_ms[event.key]
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if not is_possible and regenerate_button_rect is not None:
+                    if regenerate_button_rect.collidepoint(event.pos):
+                        action_bubble_text = "Regenerating..."
+                        action_bubble_color = (40, 90, 150)
+                        action_bubble_until_ms = pygame.time.get_ticks() + 1000
+
+                        regenerate_count += 1
+                        result = on_regenerate_button_pressed(current_seed + regenerate_count, current_size, grid)
+                        if isinstance(result, list):
+                            grid = result
+                            is_possible, map_reason = verify_map(grid)
+                            error_bubble_text = ""
+                            error_bubble_until_ms = 0
+                            action_bubble_text = "New locations generated"
+                            action_bubble_color = (50, 120, 70)
+                            action_bubble_until_ms = pygame.time.get_ticks() + 1500
+                        else:
+                            error_bubble_text = str(result) if result else "Invalid Map, maybe try again?"
+                            error_bubble_until_ms = pygame.time.get_ticks() + 3000
 
         now = pygame.time.get_ticks()
         pressed = pygame.key.get_pressed()
@@ -350,8 +423,11 @@ def draw_map_pygame(grid):
                 next_repeat_ms[pygame.K_BACKSPACE] = now + backspace_repeat_interval_ms
 
         if seed_changed:
+            regenerate_count = 0
             grid = generate_map(current_seed, current_size)
             is_possible, map_reason = verify_map(grid)
+            error_bubble_text = ""
+            error_bubble_until_ms = 0
 
         screen.fill((18, 18, 18))
         info = "up/down +/-10 | left/right +/-1 | [ ] map size | type seed + Enter"
@@ -367,6 +443,42 @@ def draw_map_pygame(grid):
             status_color = (255, 90, 90)
 
         screen.blit(font.render(status_text, True, status_color), (8, 52))
+
+        if not is_possible:
+            button_w = 200
+            button_h = 30
+            button_x = screen.get_width() - button_w - 12
+            button_y = 84
+            regenerate_button_rect = pygame.Rect(button_x, button_y, button_w, button_h)
+            pygame.draw.rect(screen, (60, 60, 60), regenerate_button_rect, border_radius=6)
+            pygame.draw.rect(screen, (210, 210, 210), regenerate_button_rect, width=1, border_radius=6)
+            button_text = font.render("Regenerate World", True, (240, 240, 240))
+            text_rect = button_text.get_rect(center=regenerate_button_rect.center)
+            screen.blit(button_text, text_rect)
+
+        if error_bubble_text and pygame.time.get_ticks() < error_bubble_until_ms:
+            bubble_h = 32
+            bubble_pad_x = 12
+            bubble_text = font.render(error_bubble_text, True, (255, 235, 235))
+            bubble_w = bubble_text.get_width() + bubble_pad_x * 2
+            bubble_x = max(8, (screen.get_width() - bubble_w) // 2)
+            bubble_y = hud_height - bubble_h - 4
+            bubble_rect = pygame.Rect(bubble_x, bubble_y, bubble_w, bubble_h)
+            pygame.draw.rect(screen, (120, 20, 20), bubble_rect, border_radius=8)
+            pygame.draw.rect(screen, (220, 130, 130), bubble_rect, width=1, border_radius=8)
+            screen.blit(bubble_text, (bubble_x + bubble_pad_x, bubble_y + 6))
+
+        if action_bubble_text and pygame.time.get_ticks() < action_bubble_until_ms:
+            bubble_h = 30
+            bubble_pad_x = 12
+            bubble_text = font.render(action_bubble_text, True, (235, 235, 245))
+            bubble_w = bubble_text.get_width() + bubble_pad_x * 2
+            bubble_x = max(8, (screen.get_width() - bubble_w) // 2)
+            bubble_y = hud_height - 70
+            bubble_rect = pygame.Rect(bubble_x, bubble_y, bubble_w, bubble_h)
+            pygame.draw.rect(screen, action_bubble_color, bubble_rect, border_radius=8)
+            pygame.draw.rect(screen, (210, 210, 210), bubble_rect, width=1, border_radius=8)
+            screen.blit(bubble_text, (bubble_x + bubble_pad_x, bubble_y + 5))
 
         screen_w, screen_h = screen.get_size()
         grid_area_h = screen_h - hud_height
