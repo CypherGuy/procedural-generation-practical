@@ -24,8 +24,8 @@ t = treasure
 New: b = building
 """
 
-seed = 1500
-size = 20
+seed = 1616
+size = 40
 
 # The formula we're using here is called the Mixed Congruential Generator (MCG), the backbone of all the rest of the code. This will form the pseudorandomness of the maps
 def formula(x, a, c, m):
@@ -80,33 +80,47 @@ def generate_map(local_seed, map_size):
                     count += 1
         return None
     
+    placed_buildings = []
     def get_all_valid_building_spots(size):
         # To stop the buildings spawning right on the edge, we can slightly change the parameters in range()
         building_spots = []
         for i in range(1, map_size - size):
             for j in range(1, map_size - size):
-                if grid[i][j] == "g":
-                    building_spots.append((i, j))
+                if grid[i][j] == "g" :
+                # To stop buildings from spawning on top of each other, we can check if the entire proposed building is grass
+                    clear = True
+                    for k in range(-1, size+1):
+                        for l in range(-1, size+1):
+                            if grid[i+k][j+l] == "b":
+                                clear = False
+                    if clear == False:
+                        break
+                    # Keeps buildings spaced apart enough
+                    elif all(((i-bx)**2 + (j-by)**2)**0.5 >= map_size // 3 for bx, by in placed_buildings):
+                        building_spots.append((i, j))
         return building_spots
 
     # To deterministically pick player, building and treasure spots, we can simply do something like seed % (total of grass places) and then use that to decide where to put the player/treasure.
     # For the buildings, I only want them to spawn in if the grid is 20x20 or larger.
     state_gen = generate_states(local_seed, map_size)
-    if map_size >= 20:
+    # For bigger maps, map_size // 20 would fill most of the map with buildings, so we cap it at 8
+    for i in range(min(8,map_size // 20)):
+        # To stop the same building shape being generated multiple times, we call the next state multiple times i+1 times each iteration
+        for _ in range(i+1):
+            current_state = next(state_gen)
         grass_spots = sum(row.count("g") for row in grid)
-        building_seed = next(state_gen) % grass_spots
-
-        building_size = (next(state_gen) % 3) + 4 # If 0 -> 4x4, if 1 -> 5x5, if 2 -> 6x6
+        building_size = (current_state % 3) + 4 # If 0 -> 4x4, if 1 -> 5x5, if 2 -> 6x6
 
         # Decide where to place the building once we have the size of it
-        available_building_spots = nth_grass_position(building_seed)
-       
         valid_building_spots = get_all_valid_building_spots(building_size)
-        bx, by = valid_building_spots[next(state_gen) % len(valid_building_spots)]
+        if not valid_building_spots:
+            continue
+        bx, by = valid_building_spots[current_state % len(valid_building_spots)]
+        placed_buildings.append((bx, by))
 
         # Now we build the building. To work out how many total building spots have been placed, we can use the nth term an = 4n-4. But to exclude the corners, we subtract 4 more, so 8 total.
         total_building_spots = 4 * building_size - 8
-        building_entrance = (next(state_gen) % total_building_spots)
+        building_entrance = (current_state % total_building_spots)
         count = 0
         for i in range(building_size):
             for j in range(building_size):
@@ -269,7 +283,7 @@ def draw_map_pygame(grid):
     min_window_w = 860
     min_window_h = 600
     min_map_size = 5
-    max_map_size = 80
+    max_map_size = 250
     seed_step = 10
     key_repeat_delay_ms = 350
     key_repeat_interval_ms = 250  # Increases value by 4 times a second
