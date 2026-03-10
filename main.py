@@ -64,8 +64,12 @@ def generate_map(local_seed, map_size):
         for j in range(map_size):
             grid[i][j] = "g"
 
+    # I realised at some point in testing that buildings always end up the same size and the entrance in the same direction no matter the wall size. in order to fix this, I create a new seed based off of the intial seed
+    wall_seed = hash((local_seed, "walls")) & 0xFFFFFFFF
+    building_seed = (local_seed * 1103515245 + 12345 + map_size * 2654435761) & 0xFFFFFFFF
+
     # Step 2: Place the walls
-    for index, state in enumerate(generate_states(local_seed, map_size)):
+    for index, state in enumerate(generate_states(wall_seed, map_size)):
         if is_wall(state):
             x, y = divmod(index, map_size)
             grid[x][y] = "w"
@@ -94,7 +98,7 @@ def generate_map(local_seed, map_size):
                             if grid[i+k][j+l] == "b":
                                 clear = False
                     if clear == False:
-                        break
+                        continue
                     # Keeps buildings spaced apart enough
                     elif all(((i-bx)**2 + (j-by)**2)**0.5 >= map_size // 3 for bx, by in placed_buildings):
                         building_spots.append((i, j))
@@ -102,7 +106,7 @@ def generate_map(local_seed, map_size):
 
     # To deterministically pick player, building and treasure spots, we can simply do something like seed % (total of grass places) and then use that to decide where to put the player/treasure.
     # For the buildings, I only want them to spawn in if the grid is 20x20 or larger.
-    state_gen = generate_states(local_seed, map_size)
+    state_gen = generate_states(building_seed, map_size)
     # For bigger maps, map_size // 20 would fill most of the map with buildings, so we cap it at 8
     for i in range(min(8,map_size // 20)):
         # To stop the same building shape being generated multiple times, we call the next state multiple times i+1 times each iteration
