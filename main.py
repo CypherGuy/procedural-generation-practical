@@ -446,7 +446,7 @@ def draw_map_pygame(grid):
         screen.fill((18, 18, 18))
         info = "up/down +/-10 | left/right +/-1 | [ ] map size | type seed + Enter"
         screen.blit(font.render(info, True, (235, 235, 235)), (8, 8))
-        seed_text = f"seed={current_seed} | input={seed_input or '_'} | map_size={current_size}"
+        seed_text = f"seed={seed_input or '_'} | map_size={current_size}"
         screen.blit(font.render(seed_text, True, (235, 235, 235)), (8, 30))
 
         if is_possible:
