@@ -273,10 +273,11 @@ def on_regenerate_button_pressed(seed, map_size, grid):
         tx, ty = treasure_pos
         grid[tx][ty] = "t"
 
-    if verify_map(grid)[0]:
+    is_valid, reason = verify_map(grid)
+    if is_valid:
         return grid
 
-    return "New generated map is Invalid. Maybe try again?"
+    return reason
 
 def draw_map_pygame(grid):
     if pygame is None:
@@ -403,7 +404,11 @@ def draw_map_pygame(grid):
                             action_bubble_color = (50, 120, 70)
                             action_bubble_until_ms = pygame.time.get_ticks() + 1500
                         else:
-                            error_bubble_text = str(result) if result else "Invalid Map, maybe try again?"
+                            # Keep HUD status text in sync with latest failed regenerate attempt.
+                            is_possible, map_reason = verify_map(grid)
+                            error_bubble_text = (
+                                f"Still invalid: {map_reason}" if map_reason else "Invalid Map, maybe try again?"
+                            )
                             error_bubble_until_ms = pygame.time.get_ticks() + 3000
 
         now = pygame.time.get_ticks()
