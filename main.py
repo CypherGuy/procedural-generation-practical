@@ -10,18 +10,22 @@ except ImportError:
 """ I will be making the following assumptions
 
 - the map is a fixed size, such as 10×10 or 12×12
-- every tile is either grass, player, treasure or wall
+- there are no invalid tiles, marked as "unknown"
 - there is exactly one player
 - there is exactly one treasure
 - the player can move on grass
 - the treasure must be reachable
+- lakes can't be walked over
+
 
 p = player
 g = grass
 w = wall
 t = treasure
+b = building
 
-New: b = building
+New: l = lake
+
 """
 
 seed = 1616
@@ -39,9 +43,13 @@ def formula(x, a, c, m):
 
 """
 
-def generate_states(seed, map_size):
+def generate_states(seed, map_size, lake=False):
     state = seed
-    for _ in range(map_size ** 2):
+    if not lake:
+        times = (map_size ** 2)
+    else:
+        times = (map_size ** 2) * 5
+    for _ in range(times): # Turns out we generate far more then map_size**2 states for the lake, so I've added a 4x multiplier for just the lake.
         state = formula(state, 5, 1, 2**32)
         yield state
 
@@ -64,9 +72,10 @@ def generate_map(local_seed, map_size):
         for j in range(map_size):
             grid[i][j] = "g"
 
-    # I realised at some point in testing that buildings always end up the same size and the entrance in the same direction no matter the wall size. in order to fix this, I create a new seed based off of the intial seed
+    # I realised at some point in testing that buildings always end up the same size and the entrance in the same direction no matter the wall size. in order to fix this, I create new seeds based off of the intial seed for all major obstacles.
     wall_seed = hash((local_seed, "walls")) & 0xFFFFFFFF
     building_seed = (local_seed * 1103515245 + 12345 + map_size * 2654435761) & 0xFFFFFFFF
+    lake_seed = (local_seed * 24597843 + 13497 + map_size * 3592078431) & 0xFFFFFFFF
 
     # Step 2: Place the walls
     for index, state in enumerate(generate_states(wall_seed, map_size)):
@@ -152,10 +161,67 @@ def generate_map(local_seed, map_size):
                         count += 1
 
                 
+    """If we want to build a lake, we need to establish a couple things.
+    
+    1) Let's say for now that the max lake size is 50 blocks
+    2) Lakes are deterministically generated
+    3) Lakes only spawn when the area is quite big ie 40 by 40
+    4) Lakes don't spawn on buildings or walls, only grass
+    
+    Our strategy could thus be to generate a list of all grass spots, make sure there's at least 10 blocks in all directions away from other lakes and buildings, and for each direction give it an n% chance of it making that block a lake block too. Kind of like Flood-Fill.
+    """
+    lake_state_gen = generate_states(lake_seed, map_size, lake=True)
+    
 
+    def count_lake_spots():
+        # Function cleaned up by AI
+        lake_spots = []
+        for i in range(10, map_size-10):
+            for j in range(10, map_size-10):
+                # We want to check 10 blocks north, south, east and west and make sure none of them are buildings
+                if grid[i][j] == "g" and all(grid[i+k][j] not in ("b", "l") for k in range(-10, 11)) and all(grid[i][j+k] not in ("b", "l") for k in range(-10, 11)):
+                    lake_spots.append((i, j))
+        return lake_spots
+
+   
+    for i in range(min(4,map_size // 40)):
+        lake_seeds = count_lake_spots()
+        if not lake_seeds:
+            break
+        lake_pos = lake_seeds[next(lake_state_gen) % len(lake_seeds)]
+
+        # Now fill in the lake piece
+        if lake_pos is not None:
+            px, py = lake_pos
+            grid[px][py] = "l"
+
+        # And now we fill in the rest of the lake, deterministically deciding how many blocks to fill in
+        amount_of_spots = ((next(lake_state_gen) % 30) + 20) - 1 # 20 to 50 blocks total
+        frontier = [lake_pos]
+        seen_frontier = {lake_pos}
+        while frontier:
+            if amount_of_spots <= 0:
+                frontier = []
+                break
+            x, y = frontier.pop()
+            # What's nice about this is that this is the only time that we ever need to change the block.
+            if grid[x][y] != "l":
+                grid[x][y] = "l"
+                amount_of_spots -= 1
+            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+
+                # For randomness let's give each one a 70% chance of spawning a tile
+                dice = next(lake_state_gen) % 10
+                if dice < 7:
+                    nx, ny = x + dx, y + dy
+                    if nx < 0 or nx >= map_size or ny < 0 or ny >= map_size:
+                        continue
+                    if grid[nx][ny] == "g" and (nx, ny) not in seen_frontier:
+                        seen_frontier.add((nx, ny))
+                        frontier.append((nx, ny))
+                        
     grass_spots = sum(row.count("g") for row in grid)
     player_seed = next(state_gen) % grass_spots
-
     player_pos = nth_grass_position(player_seed)
 
     if player_pos is not None:
@@ -225,7 +291,7 @@ def verify_map(grid):
         for dx, dy in directions:
             nx, ny = x + dx, y + dy
             if 0 <= nx < local_size and 0 <= ny < local_size:
-                if (nx, ny) not in visited and grid[nx][ny] not in ("w", "b"):
+                if (nx, ny) not in visited and grid[nx][ny] not in ("w", "b", "l"):
                     visited.add((nx, ny))
                     queue.append(((nx, ny), distance + 1))
 
@@ -297,6 +363,7 @@ def draw_map_pygame(grid):
         "g": (34, 139, 34),      # grass: green
         "w": (128, 128, 128),    # wall: grey
         "b": (139, 0, 0),        # building: dark red
+        "l": (10, 45, 120),      # lake: dark blue
         "p": (0, 255, 255),      # player: cyan
         "t": (255, 215, 0),      # treasure: gold
     }
