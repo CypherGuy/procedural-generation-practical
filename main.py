@@ -28,8 +28,8 @@ New: l = lake
 
 """
 
-seed = 1616
-size = 40
+seed = 2103
+size = 80
 
 # The formula we're using here is called the Mixed Congruential Generator (MCG), the backbone of all the rest of the code. This will form the pseudorandomness of the maps
 def formula(x, a, c, m):
@@ -163,7 +163,7 @@ def generate_map(local_seed, map_size):
                 
     """If we want to build a lake, we need to establish a couple things.
     
-    1) Let's say for now that the max lake size is 50 blocks
+    1) Let's say for now that the minimum lake size is 20 blocks
     2) Lakes are deterministically generated
     3) Lakes only spawn when the area is quite big ie 40 by 40
     4) Lakes don't spawn on buildings or walls, only grass
@@ -199,7 +199,7 @@ def generate_map(local_seed, map_size):
         amount_of_spots = ((next(lake_state_gen) % 30) + 20) - 1 # 20 to 50 blocks total
         frontier = [lake_pos]
         seen_frontier = {lake_pos}
-        while frontier:
+        while frontier or amount_of_spots <= 0:
             if amount_of_spots <= 0:
                 frontier = []
                 break
@@ -209,16 +209,14 @@ def generate_map(local_seed, map_size):
                 grid[x][y] = "l"
                 amount_of_spots -= 1
             for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-
-                # For randomness let's give each one a 70% chance of spawning a tile
-                dice = next(lake_state_gen) % 10
-                if dice < 7:
-                    nx, ny = x + dx, y + dy
-                    if nx < 0 or nx >= map_size or ny < 0 or ny >= map_size:
-                        continue
-                    if grid[nx][ny] == "g" and (nx, ny) not in seen_frontier:
-                        seen_frontier.add((nx, ny))
-                        frontier.append((nx, ny))
+                nx, ny = x + dx, y + dy
+                if not(nx < 0 or nx >= map_size or ny < 0 or ny >= map_size):
+                    # For randomness let's give each one a 85% chance of spawning a tile. 70% is too low
+                    dice = next(lake_state_gen) % 20
+                    if dice <= 17:
+                        if grid[nx][ny] == "g" and (nx, ny) not in seen_frontier:
+                            seen_frontier.add((nx, ny))
+                            frontier.append((nx, ny))
                         
     grass_spots = sum(row.count("g") for row in grid)
     player_seed = next(state_gen) % grass_spots
@@ -250,6 +248,7 @@ def verify_map(grid):
     - The treasure is reachable
     - There is a set distance between player and treasure to stop very easy maps
     - The player can access the entrance of all buildings 
+    - Each lake is over 20 blocks long
     """
     local_size = len(grid)
     player_pos = None
@@ -272,14 +271,39 @@ def verify_map(grid):
 
     if player_pos is None or treasure_pos is None:
         return False, "player or treasure position missing"
+
+    # Each connected lake must be between 20 and 50 tiles. We check using BFS
+    lake_visited = set()
+    directions = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+    for i in range(local_size):
+        for j in range(local_size):
+            if grid[i][j] != "l" or (i, j) in lake_visited:
+                continue
+
+            lake_size = 0
+            queue = deque([(i, j)])
+            lake_visited.add((i, j))
+
+            while queue:
+                x, y = queue.popleft()
+                lake_size += 1
+
+                for dx, dy in directions:
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < local_size and 0 <= ny < local_size:
+                        if grid[nx][ny] == "l" and (nx, ny) not in lake_visited:
+                            lake_visited.add((nx, ny))
+                            queue.append((nx, ny))
+
+            if lake_size < 20:
+                return False, f"lake size {lake_size} under 20"
     
     # Set the minimum shortest path to be at least 2/3 of local_size
     min_shortest_path = math.ceil((2 * local_size) / 3)
 
     queue = deque([(player_pos, 0)])
     visited = {player_pos}
-    directions = ((1, 0), (-1, 0), (0, 1), (0, -1))
-
     while queue:
         (x, y), distance = queue.popleft()
 
