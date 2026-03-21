@@ -204,6 +204,7 @@ def generate_map(local_seed, map_size):
                 frontier = []
                 break
             x, y = frontier.pop()
+            
             # What's nice about this is that this is the only time that we ever need to change the block.
             if grid[x][y] != "l":
                 grid[x][y] = "l"
@@ -211,7 +212,7 @@ def generate_map(local_seed, map_size):
             for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
                 nx, ny = x + dx, y + dy
                 if not(nx < 0 or nx >= map_size or ny < 0 or ny >= map_size):
-                    # For randomness let's give each one a 85% chance of spawning a tile. 70% is too low
+                    # For randomness let's give each one a 85% chance of spawning a tile. 
                     dice = next(lake_state_gen) % 20
                     if dice <= 17:
                         if grid[nx][ny] == "g" and (nx, ny) not in seen_frontier:
@@ -247,7 +248,6 @@ def verify_map(grid):
     - 1 treasure 
     - The treasure is reachable
     - There is a set distance between player and treasure to stop very easy maps
-    - The player can access the entrance of all buildings 
     - Each lake is over 20 blocks long
     """
     local_size = len(grid)
@@ -272,7 +272,7 @@ def verify_map(grid):
     if player_pos is None or treasure_pos is None:
         return False, "player or treasure position missing"
 
-    # Each connected lake must be between 20 and 50 tiles. We check using BFS
+    # Each connected lake must be over 20 blocks. We check using BFS
     lake_visited = set()
     directions = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
