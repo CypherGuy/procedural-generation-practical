@@ -1,4 +1,5 @@
 from collections import deque
+import copy
 import math
 import sys
 
@@ -48,8 +49,8 @@ def generate_states(seed, map_size, lake=False):
     if not lake:
         times = (map_size ** 2)
     else:
-        times = (map_size ** 2) * 5
-    for _ in range(times): # Turns out we generate far more then map_size**2 states for the lake, so I've added a 4x multiplier for just the lake.
+        times = (map_size ** 2) * 1000
+    for _ in range(times): 
         state = formula(state, 5, 1, 2**32)
         yield state
 
@@ -73,7 +74,7 @@ def generate_map(local_seed, map_size):
             grid[i][j] = "g"
 
     # I realised at some point in testing that buildings always end up the same size and the entrance in the same direction no matter the wall size. in order to fix this, I create new seeds based off of the intial seed for all major obstacles.
-    wall_seed = hash((local_seed, "walls")) & 0xFFFFFFFF
+    wall_seed = (local_seed * 6364136223846793005 + 1442695040888963407) & 0xFFFFFFFF
     building_seed = (local_seed * 1103515245 + 12345 + map_size * 2654435761) & 0xFFFFFFFF
     lake_seed = (local_seed * 24597843 + 13497 + map_size * 3592078431) & 0xFFFFFFFF
 
@@ -167,19 +168,25 @@ def generate_map(local_seed, map_size):
     2) Lakes are deterministically generated
     3) Lakes only spawn when the area is quite big ie 40 by 40
     4) Lakes don't spawn on buildings or walls, only grass
+
+    New: We want lakes to not just be lines but to actually close on each other, forming a circle or some other shape.
+
+    Our strategy for this could be to generate the lake as normal, find the two furthest points from each other and 
     
-    Our strategy could thus be to generate a list of all grass spots, make sure there's at least 10 blocks in all directions away from other lakes and buildings, and for each direction give it an n% chance of it making that block a lake block too. Kind of like Flood-Fill.
     """
     lake_state_gen = generate_states(lake_seed, map_size, lake=True)
+    NEIGHBOUR_OFFSET_4 = ((+1, 0), (0, +1), (-1, 0), (0, -1))
+    NEIGHBOUR_OFFSET_8 = ((+1, 0), (0, +1), (-1, 0), (0, -1), (+1, +1), (+1, -1), (-1, +1), (-1, -1))
     
 
     def count_lake_spots():
+
+        gap = 30
         # Function cleaned up by AI
         lake_spots = []
-        for i in range(10, map_size-10):
-            for j in range(10, map_size-10):
-                # We want to check 10 blocks north, south, east and west and make sure none of them are buildings
-                if grid[i][j] == "g" and all(grid[i+k][j] not in ("b", "l") for k in range(-10, 11)) and all(grid[i][j+k] not in ("b", "l") for k in range(-10, 11)):
+        for i in range(gap, map_size-gap):
+            for j in range(gap, map_size-gap):
+                if grid[i][j] == "g" and all(grid[i+k][j] not in ("b", "l") for k in range(-gap, gap+1)) and all(grid[i][j+k] not in ("b", "l") for k in range(-gap, gap+1)):
                     lake_spots.append((i, j))
         return lake_spots
 
@@ -218,7 +225,142 @@ def generate_map(local_seed, map_size):
                         if grid[nx][ny] == "g" and (nx, ny) not in seen_frontier:
                             seen_frontier.add((nx, ny))
                             frontier.append((nx, ny))
-                        
+
+        # We've now drawn the lake's 'line'. Now we want to connect the ends. Step one is to collect all the lake positions
+        lake_visited = []
+        directions = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        for i in range(map_size):
+            for j in range(map_size):
+                if grid[i][j] != "l" or (i, j) in lake_visited:
+                    continue
+
+                queue = deque([(i, j)])
+                lake_visited.append((i, j))
+
+                while queue:
+                    x, y = queue.popleft()
+
+                    for dx, dy in directions:
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < map_size and 0 <= ny < map_size:
+                            if grid[nx][ny] == "l" and (nx, ny) not in lake_visited:
+                                lake_visited.append((nx, ny))
+                                queue.append((nx, ny))
+        
+        # My idea for finding the two ends is to pick a random point, find the furthest point from that, then find the furthest point from that one
+        random_point = lake_visited[(next(lake_state_gen) % len(lake_visited))]
+        # Now we have our random point, we need to find the furthest point from it in lake_visited using ((ax-bx)**2 + (ay-by)**2)**0.5
+        furthest_point = max(lake_visited, key=lambda point: ((point[0]-random_point[0])**2 + (point[1]-random_point[1])**2)**0.5)
+        # Do the same thing again, but from the other end
+        other_furthest_point = max(lake_visited, key=lambda point: ((point[0]-furthest_point[0])**2 + (point[1]-furthest_point[1])**2)**0.5)
+
+        # Now we have the two ends, we need to do a floodfill from one end to the other to connect them.
+        # However to keep rivers sometimes depending on whether it looks right, we can say that if the endpoints are under x% of the total river length, we'll floodfill the river and make it a lake. The higher x, the more chance of a lake.
+        total_lake_length = len(lake_visited)
+        if total_lake_length * 0.65 > ((other_furthest_point[0]-furthest_point[0])**2 + (other_furthest_point[1]-furthest_point[1])**2)**0.5:
+
+            def draw_pixel(from_coordinate, to_coordinate, neighbour): 
+                """This procedure works out the distance from where we are now to our end and sees if
+                the neighbour is closer or further. If it's closer, it has a 95% chance to fill in 
+                that spot as a lake. If not it'll be a 5% chance. """
+                ax = from_coordinate[0]
+                ay = from_coordinate[1]
+                bx = to_coordinate[0]
+                by = to_coordinate[1]
+
+                #neighbour is one of the neighbour offsets
+                nx = neighbour[0]
+                ny = neighbour[1]
+
+                origin_to_end = ((ax-bx)**2 + (ay-by)**2)**0.5
+                neighbour_to_end = (((ax+nx)-bx)**2 + ((ay+ny)-by)**2)**0.5
+
+                chance_if_neighbour_is_closer = 40
+                if neighbour_to_end < origin_to_end:  # Neighbour is closer
+                    if next(lake_state_gen) % 100 >= chance_if_neighbour_is_closer:
+                        grid[ax + nx][ay + ny] = "l"
+                        to_paint.append(((ax + nx), (ay + ny)))
+                        if ((ax + nx), (ay + ny)) not in tracked: 
+                            tracked.add(((ax + nx), (ay + ny))) 
+
+                        if from_coordinate not in seen:
+                            seen.append(from_coordinate)
+
+                        if to_coordinate not in seen:
+                            seen.append(to_coordinate)
+
+                        if ((ax + nx), (ay + ny)) not in seen:
+                            seen.append(((ax + nx), (ay + ny)))
+
+                else: # Neighbour is further away
+                    if next(lake_state_gen) % 100 < chance_if_neighbour_is_closer:
+                        grid[ax + nx][ay + ny] = "l"
+                        to_paint.append(((ax + nx), (ay + ny)))
+                        if ((ax + nx), (ay + ny)) not in tracked: 
+                            tracked.add(((ax + nx), (ay + ny))) 
+
+                        if from_coordinate not in seen:
+                            seen.append(from_coordinate)
+
+                        if to_coordinate not in seen:
+                            seen.append(to_coordinate)
+
+                        if ((ax + nx), (ay + ny)) not in seen:
+                            seen.append(((ax + nx), (ay + ny)))
+
+
+            tracked = {furthest_point}  # <-- The starting point starts in the set.
+            seen = lake_visited
+            seen.append(furthest_point)
+            seen.append(other_furthest_point)
+            to_paint = [furthest_point]
+            while other_furthest_point not in tracked and len(to_paint) > 0:
+                this_pixel = to_paint.pop()
+                tx, ty = this_pixel
+                for dx, dy in NEIGHBOUR_OFFSET_4:
+                    nx, ny = tx + dx, ty + dy
+
+                    if (
+                        nx < 0 or nx >= size
+                        or ny < 0 or ny >= size
+                        or grid[nx][ny] in ("b", "l")
+                    ):
+                        continue
+
+                    draw_pixel(this_pixel, other_furthest_point, (dx, dy))
+
+            # I've noticed from testing that sometimes the sides of a river are square-like ie fully vertical/horizontal. 
+            # To fix this we could, after generating the lake/river, see if any of the neighbouring grass tiles have 3+ water tiles, 
+            # and convert those that do to water tiles too.
+
+            # To stop this code affecting tiles that have just beeen placed, we'll work on a copy, then convert that to the real grid after
+            for _ in range(4):
+                pseudo_grid = copy.deepcopy(grid)
+                for x, y in seen:
+                    neighbours_water = 0
+                    for dx, dy in NEIGHBOUR_OFFSET_4:
+                        nx, ny = x + dx, y + dy
+                        if nx < 0 or nx >= size or ny < 0 or ny >= size:
+                            continue
+                        else:
+                            # See if the neighbour is grass, then if it is check if it has 3+ water neighbours
+                            if pseudo_grid[x + dx][y + dy] == "g":
+                                for dx2, dy2 in NEIGHBOUR_OFFSET_4:
+                                    nx2, ny2 = x + dx + dx2, y + dy + dy2
+                                    if nx2 < 0 or nx2 >= size or ny2 < 0 or ny2 >= size:
+                                        continue
+                                    else:
+                                        if pseudo_grid[nx2][ny2] == "l":
+                                            neighbours_water += 1
+                                if neighbours_water >= 3:
+                                    pseudo_grid[nx][ny] = "l"
+                                neighbours_water = 0
+
+                # Convert the copy to the real grid
+                for x, y in seen:
+                    grid[x][y] = pseudo_grid[x][y]
+
     grass_spots = sum(row.count("g") for row in grid)
     player_seed = next(state_gen) % grass_spots
     player_pos = nth_grass_position(player_seed)
@@ -250,7 +392,7 @@ def verify_map(grid):
     - There is a set distance between player and treasure to stop very easy maps
     - Each lake is over 20 blocks long
     """
-    local_size = len(grid)
+    local_size = size
     player_pos = None
     treasure_pos = None
     player_count = 0
