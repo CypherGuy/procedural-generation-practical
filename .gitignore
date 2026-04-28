@@ -1,2 +1,7 @@
 reference_codes.py
 .venv
+BUG_FIXES.md
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
