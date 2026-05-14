@@ -113,3 +113,9 @@ If the Euclidean distance between the endpoints is less than 65% of the total la
 - The shortest path length is at least `⌈(2 × map_size) / 3⌉`, preventing trivially small maps from placing player and treasure next to each other
 
 If the map fails validation the HUD shows the reason and a **Regenerate World** button repositions the player and treasure without rebuilding the full terrain.
+
+---
+
+## License
+
+MIT
